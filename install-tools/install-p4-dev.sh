@@ -22,7 +22,7 @@ USER_NAME=$(whoami)
 # building directory
 BUILD_DIR=~/p4-tools
 # number of cores
-NUM_CORES=`grep -c ^processor /proc/cpuinfo`
+NUM_CORES=$(grep -c ^processor /proc/cpuinfo)
 DEBUG_FLAGS=true
 P4_RUNTIME=true
 SYSREPO=false   # Sysrepo prevents simple_switch_grpc from starting correctly
@@ -116,7 +116,7 @@ function do_global_setup {
     libboost-test-dev \
     libc6-dev \
     libevent-dev \
-    libgc1 \
+    libgc-dev \
     libgflags-dev \
     libgmpxx4ldbl \
     libgmp10 \
@@ -232,7 +232,7 @@ function do_grpc {
     echo "grpc installed"
 }
 
-PY3LOCALPATH=`curl -sSL https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/scripts/py3localpath.py | python3`
+PY3LOCALPATH=$(curl -sSL https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/scripts/py3localpath.py | python3)
 function site_packages_fix {
     local SRC_DIR
     local DST_DIR
@@ -253,24 +253,55 @@ function site_packages_fix {
 }
 
 function do_bmv2_deps {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d bmv2 ]; then
-        git clone https://github.com/p4lang/behavioral-model.git bmv2
-    fi
-    cd bmv2
-    git checkout ${BMV2_COMMIT}
+    # Install dependencies manually to avoid issues with install_deps.sh
+    apt-get install -y \
+    git automake libtool build-essential \
+    pkg-config libevent-dev libssl-dev \
+    libffi-dev python3-dev python3-pip \
+    libjudy-dev libgmp-dev \
+    libpcap-dev \
+    libboost-dev \
+    libboost-program-options-dev \
+    libboost-system-dev \
+    libboost-filesystem-dev \
+    libboost-thread-dev \
+    libboost-test-dev \
+    libboost-context-dev \
+    libboost-coroutine-dev \
+    libboost-chrono-dev \
+    libboost-date-time-dev \
+    libboost-atomic-dev \
+    libboost-regex-dev \
+    libboost-random-dev \
+    libboost-math-dev \
+    libboost-serialization-dev \
+    libtool-bin \
+    valgrind \
+    libreadline-dev \
+    g++ \
+    wget \
+    net-tools
 
-    # Install dependencies
-    ./install_deps.sh
+    # Install Thrift 0.13.0
+    cd ${BUILD_DIR}
+    if [ ! -d thrift ]; then
+        wget https://dlcdn.apache.org/thrift/0.13.0/thrift-0.13.0.tar.gz
+        tar xzf thrift-0.13.0.tar.gz
+        mv thrift-0.13.0 thrift
+        rm thrift-0.13.0.tar.gz
+    fi
+
+    cd thrift
+    ./configure --disable-libs --disable-tutorial --disable-tests --without-qt4 --without-qt5 --without-c_glib
+    make -j${NUM_CORES}
+    make install
+    ldconfig
 }
 
 # Install behavioral model
 function do_bmv2 {
     # Install dependencies
-    if [ "$P4_RUNTIME" = false ]; then
-        do_bmv2_deps
-    fi
+    do_bmv2_deps
 
     # Clone source
     cd ${BUILD_DIR}
@@ -280,335 +311,10 @@ function do_bmv2 {
     cd bmv2
     git checkout ${BMV2_COMMIT}
 
+    # Modify install_deps.sh to replace libgc1c2 with libgc-dev
+    sed -i 's/libgc1c2/libgc-dev/g' install_deps.sh
+
     # Build behavioral-model
     ./autogen.sh
     if [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = true ]; then
-        ./configure --with-pi --with-thrift --with-nanomsg --enable-debugger --disable-elogger "CXXFLAGS=-O0 -g"
-    elif [ "$DEBUG_FLAGS" = true ] && [ "$P4_RUNTIME" = false ]; then
-        ./configure --with-thrift --with-nanomsg --enable-debugger --enable-elogger "CXXFLAGS=-O0 -g"
-    elif [ "$DEBUG_FLAGS" = false ] && [ "$P4_RUNTIME" = true ]; then
-        ./configure --with-pi --without-nanomsg --disable-elogger --disable-logging-macros 'CFLAGS=-g -O2' 'CXXFLAGS=-g -O2'
-    else
-        ./configure --without-nanomsg --disable-elogger --disable-logging-macros 'CFLAGS=-g -O2' 'CXXFLAGS=-g -O2'
-    fi
-    make -j${NUM_CORES}
-    make install
-    ldconfig
-}
-
-# Install PI dependencies
-function do_PI_deps {
-    apt-get install -y --no-install-recommends \
-    libboost-system-dev \
-    libboost-thread-dev \
-    libjudy-dev \
-    libreadline-dev \
-    libtool-bin \
-    valgrind
-}
-
-function do_PI {
-    # Install dependencies
-    do_PI_deps
-
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d PI ]; then
-        git clone https://github.com/p4lang/PI.git PI
-    fi
-    cd PI
-    git checkout ${PI_COMMIT}
-    git submodule update --init --recursive
-
-    # Build PI
-    ./autogen.sh
-    if [ "$DEBUG_FLAGS" = true ]; then
-        if [ "$SYSREPO" = true ]; then
-            ./configure --with-proto --with-sysrepo --without-internal-rpc --without-cli --without-bmv2 "CXXFLAGS=-O0 -g"
-        else
-            ./configure --with-proto --without-internal-rpc --without-cli --without-bmv2 "CXXFLAGS=-O0 -g"
-        fi
-    else
-        if [ "$SYSREPO" = true ]; then
-            ./configure --with-proto --with-sysrepo --without-internal-rpc --without-cli --without-bmv2
-        else
-            ./configure --with-proto --without-internal-rpc --without-cli --without-bmv2
-        fi
-    fi
-    make -j${NUM_CORES}
-    make install
-    ldconfig
-    make clean
-
-    echo "PI Installed"
-}
-
-# Install p4c dependencies
-function do_p4c_deps {
-    apt-get install -y --no-install-recommends \
-    bison \
-    clang \
-    flex \
-    iptables \
-    libboost-graph-dev \
-    libboost-iostreams-dev \
-    libelf-dev \
-    libfl-dev \
-    libgc-dev \
-    llvm \
-    net-tools \
-    zlib1g-dev \
-    lld \
-    pkg-config \
-    ccache
-
-    pip install scapy==2.5.0
-    pip install ply
-    pip install pyroute2
-    #pip install ptf
-}
-
-# Install p4c
-function do_p4c {
-    # Install dependencies
-    do_p4c_deps
-
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d p4c ]; then
-        git clone https://github.com/p4lang/p4c.git p4c
-    fi
-    cd p4c
-    git checkout ${P4C_COMMIT}
-    git submodule update --init --recursive
-    mkdir -p build
-    cd build
-
-    # Build p4c
-    if [ "$DEBUG_FLAGS" = true ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=DEBUG $*
-    else
-        # Debug build
-        cmake ..
-    fi
-    make -j${NUM_CORES}
-    make install
-    ldconfig
-    cd ..
-
-    # clean since it uses 7GB
-    rm -rf build/
-
-    echo "p4c installed"
-}
-
-# Install ptf
-function do_ptf {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d ptf ]; then
-        git clone https://github.com/p4lang/ptf.git ptf
-    fi
-    cd ptf
-    git pull origin main
-
-    # Build ptf
-    pip3 install .
-    #python3 setup.py install
-}
-
-# Install mininet
-function do_mininet_no_python2 {
-    # Clone source
-    cd $HOME
-
-    # mininet installing process forces python2 to be installed
-    # we want to avoid this in ubuntu 20+
-    # This patch helps us doing so
-    # from https://github.com/jafingerhut/p4-guide/blob/d36766f2c50a2159e43dd843085fbbe416d23b33/bin/install-p4dev-v6.sh#L868
-    MININET_COMMIT="5b1b376336e1c6330308e64ba41baac6976b6874"  # 2023-May-28
-    git clone https://github.com/mininet/mininet mininet
-    cd mininet
-    git checkout ${MININET_COMMIT}
-
-    # patching mininet
-    wget -O mininet.patch https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/conf_files/mininet.patch
-    patch -p1 < "mininet.patch"
-
-    # Build mininet
-    PYTHON=python3 ./util/install.sh -nwv
-
-    echo "mininet installed"
-}
-
-# Install libyang necessary for FRRouting
-# for ubuntu 20.04 :http://docs.frrouting.org/projects/dev-guide/en/latest/building-frr-for-ubuntu2004.html
-function do_libyang {
-    # Install dependencies
-    do_sysrepo_libyang_deps
-
-    # Clone source libyang
-    cd ${BUILD_DIR}
-    if [ ! -d libyang ]; then
-        git clone https://github.com/CESNET/libyang.git libyang
-    fi
-
-    LIBYANG_VER="2.0.0"
-    LIBYANG_COMMIT="v${LIBYANG_VER}"
-
-    cd libyang
-    git checkout ${LIBYANG_COMMIT}
-
-    # Build libyang
-    if [ ! -d build ]; then
-        mkdir build
-    else
-        rm -R build
-        mkdir build
-    fi
-    cd build
-    cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-        -D CMAKE_BUILD_TYPE:String="Release" ..
-    make -j${NUM_CORES}
-    make install
-    ldconfig
-}
-
-# Install FRRouting dependencies
-function do_frrouting_deps {
-    # Install dependencies
-    do_libyang
-
-    apt-get install -y \
-    git autoconf automake libtool make libreadline-dev texinfo \
-    pkg-config libpam0g-dev libjson-c-dev bison flex \
-    libc-ares-dev python3-dev python3-sphinx \
-    install-info build-essential libsnmp-dev perl \
-    libcap-dev libelf-dev libunwind-dev
-}
-
-# Install FRRouting
-# for ubuntu 20.04 :http://docs.frrouting.org/projects/dev-guide/en/latest/building-frr-for-ubuntu2004.html
-function do_frrouting {
-    # Install dependencies
-    do_frrouting_deps
-
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d frr ]; then
-        git clone https://github.com/FRRouting/frr.git frr
-    fi
-    cd frr
-    git checkout ${FRROUTING_COMMIT}
-
-    # Build FRRouting
-    ./bootstrap.sh
-    ./configure --enable-fpm --enable-protobuf --enable-multipath=8
-    make -j${NUM_CORES}
-    make install
-    ldconfig
-}
-
-# Install p4-utils
-function do_p4-utils {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d p4-utils ]; then
-        git clone https://github.com/nsg-ethz/p4-utils.git p4-utils
-    fi
-    cd p4-utils
-
-    # TODO: should be removed
-    git checkout ${P4_UTILS_BRANCH}
-
-    # Build p4-utils
-    ./install.sh
-}
-
-# Install p4-learning
-function do_p4-learning {
-    # Clone source
-    cd ${BUILD_DIR}
-    if [ ! -d p4-learning ]; then
-        git clone https://github.com/nsg-ethz/p4-learning.git p4-learning
-    fi
-
-    cd p4-learning
-
-    # TODO: should be removed
-    git checkout ${P4_UTILS_BRANCH}
-}
-
-# Install Sphinx and ReadtheDocs
-function do_sphinx {
-    apt-get install -y python3-sphinx
-    pip3 install sphinx-rtd-theme
-}
-
-function google_module_fix {
-    curl -sSL https://raw.githubusercontent.com/nsg-ethz/p4-utils/${P4_UTILS_BRANCH}/install-tools/scripts/protoinitfix.py | python3
-}
-
-###### MAIN ######
-
-do_init_checks
-
-# Print commands and exit on errors
-set -xe
-
-echo "------------------------------------------------------------"
-echo "Time and disk space used before installation begins:"
-set -x
-date
-df -h .
-df -BM .
-
-# Create BUILD_DIR
-mkdir -p ${BUILD_DIR}
-
-# Set locale
-locale-gen en_US.UTF-8
-
-# Update packages list
-apt-get update
-
-# initial ubuntu packages and global installs
-do_global_setup
-
-# Install P4 tools
-do_protobuf
-
-# runtime install
-if [ "$P4_RUNTIME" = true ]; then
-    do_grpc
-    do_bmv2_deps
-    if [ "$SYSREPO" = true ]; then
-        do_sysrepo_libyang
-    fi
-    do_PI
-fi
-
-# python site packages fix
-site_packages_fix
-
-do_bmv2
-do_p4c
-do_ptf
-do_mininet_no_python2
-
-if [ "$FRROUTING" = true ]; then
-    do_frrouting
-fi
-
-do_p4-utils
-do_p4-learning
-
-# last fixes
-site_packages_fix
-google_module_fix
-
-if [ "$DOCUMENTATION" = true ]; then
-    do_sphinx
-fi
-
-echo "Installation complete!"
+        ./configure --with-pi --with-thrift --with-nanomsg --enable-debugger --disable-elogger
