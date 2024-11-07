@@ -651,3 +651,4 @@ if [ "$DOCUMENTATION" = true ]; then
 fi
 
 echo "Installation complete!"
+
