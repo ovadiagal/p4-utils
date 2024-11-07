@@ -116,7 +116,7 @@ function do_global_setup {
     libboost-test-dev \
     libc6-dev \
     libevent-dev \
-    libgc1c2 \
+    libgc-dev \
     libgflags-dev \
     libgmpxx4ldbl \
     libgmp10 \
